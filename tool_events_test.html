@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tool Events Test</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; background: #1a1a1a; color: white; }
+        .event { margin: 10px 0; padding: 10px; border-radius: 5px; }
+        .tool-use { background: #4a2500; border-left: 4px solid #ff8800; }
+        .tool-result { background: #001a4a; border-left: 4px solid #0088ff; }
+        .thought { background: #2a0050; border-left: 4px solid #8800ff; }
+        .final { background: #004a00; border-left: 4px solid #00ff00; }
+        .timestamp { font-size: 0.8em; opacity: 0.7; }
+        .tool-tag { display: inline-block; background: #555; padding: 2px 6px; border-radius: 3px; font-size: 0.7em; margin-left: 10px; }
+        button { background: #0088ff; color: white; border: none; padding: 10px 20px; border-radius: 5px; cursor: pointer; margin: 10px 5px; }
+        button:hover { background: #0066cc; }
+        input[type="text"] { width: 400px; padding: 8px; margin: 10px 0; background: #333; color: white; border: 1px solid #555; border-radius: 3px; }
+        #output { max-height: 600px; overflow-y: auto; }
+    </style>
+</head>
+<body>
+    <h1>AI Thinking Agent - Tool Events Test</h1>
+    <div>
+        <input type="text" id="queryInput" placeholder="Enter your query..." value="What are the latest developments in quantum computing?">
+        <br>
+        <button onclick="testQuery()">Submit Query</button>
+        <button onclick="clearOutput()">Clear</button>
+    </div>
+    
+    <div id="output"></div>
+
+    <script>
+        const API_URL = 'http://localhost:8000';
+        let currentEventSource = null;
+
+        function addEvent(content, type = 'event', tool = null) {
+            const output = document.getElementById('output');
+            const div = document.createElement('div');
+            div.className = `event ${type}`;
+            
+            const timestamp = new Date().toLocaleTimeString();
+            const toolTag = tool ? `<span class="tool-tag">${tool}</span>` : '';
+            
+            let icon = '';
+            switch (type) {
+                case 'tool-use': icon = '🔧'; break;
+                case 'tool-result': icon = '✅'; break;
+                case 'thought': icon = '🧠'; break;
+                case 'final': icon = '💡'; break;
+                default: icon = '📡'; break;
+            }
+            
+            div.innerHTML = `
+                <div>
+                    <strong>${icon} ${timestamp}</strong>${toolTag}
+                </div>
+                <div>${content}</div>
+            `;
+            
+            output.appendChild(div);
+            output.scrollTop = output.scrollHeight;
+        }
+
+        async function testQuery() {
+            const query = document.getElementById('queryInput').value.trim();
+            if (!query) {
+                alert('Please enter a query');
+                return;
+            }
+
+            if (currentEventSource) {
+                currentEventSource.close();
+            }
+
+            try {
+                addEvent(`Starting query: "${query}"`);
+                
+                // Create query
+                const queryResponse = await fetch(`${API_URL}/v1/query`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        query: query,
+                        model: 'o4-mini'
+                    })
+                });
+                
+                if (!queryResponse.ok) {
+                    throw new Error(`HTTP ${queryResponse.status}: ${queryResponse.statusText}`);
+                }
+                
+                const queryData = await queryResponse.json();
+                addEvent(`Query created with run_id: ${queryData.run_id}`);
+                
+                // Listen to event stream
+                currentEventSource = new EventSource(`${API_URL}/v1/stream/${queryData.run_id}`);
+                
+                currentEventSource.onmessage = (event) => {
+                    try {
+                        const data = JSON.parse(event.data);
+                        
+                        switch (data.type) {
+                            case 'tool_use':
+                                addEvent(`${data.action}: ${data.details}`, 'tool-use', getToolDisplayName(data.tool));
+                                break;
+                            case 'tool_result':
+                                addEvent(data.result, 'tool-result', getToolDisplayName(data.tool));
+                                break;
+                            case 'thought':
+                                addEvent(data.text, 'thought');
+                                break;
+                            case 'final_answer':
+                                addEvent(data.text, 'final');
+                                break;
+                            case 'citation':
+                                addEvent(`Citation: ${data.title} - ${data.url}`, 'event');
+                                break;
+                            case 'page':
+                                addEvent(`Page scraped: ${data.url}`, 'event');
+                                break;
+                            case 'complete':
+                                addEvent('Query completed!', 'event');
+                                currentEventSource.close();
+                                break;
+                            case 'error':
+                                addEvent(`Error: ${data.message}`, 'event');
+                                currentEventSource.close();
+                                break;
+                            case 'heartbeat':
+                                // Don't display heartbeats
+                                break;
+                            default:
+                                addEvent(`Unknown event: ${data.type}`, 'event');
+                        }
+                    } catch (e) {
+                        addEvent(`Error parsing event: ${e.message}`, 'event');
+                    }
+                };
+                
+                currentEventSource.onerror = (error) => {
+                    addEvent('Event stream error occurred', 'event');
+                    currentEventSource.close();
+                };
+                
+            } catch (error) {
+                addEvent(`Error: ${error.message}`, 'event');
+            }
+        }
+
+        function getToolDisplayName(tool) {
+            switch (tool) {
+                case 'google_search': return 'Google Search';
+                case 'web_scraper': return 'Web Scraper';
+                case 'embedding': return 'Embeddings';
+                default: return tool;
+            }
+        }
+
+        function clearOutput() {
+            document.getElementById('output').innerHTML = '';
+            if (currentEventSource) {
+                currentEventSource.close();
+            }
+        }
+    </script>
+</body>
+</html>

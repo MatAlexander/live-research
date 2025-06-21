@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Final Answer Debug Test</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; background: #1a1a1a; color: white; }
+        .event { margin: 10px 0; padding: 10px; border-radius: 5px; background: #333; }
+        .final-answer { background: #004a00; border-left: 4px solid #00ff00; font-weight: bold; }
+        .debug { background: #4a0000; border-left: 4px solid #ff0000; }
+        button { background: #0088ff; color: white; border: none; padding: 10px 20px; border-radius: 5px; cursor: pointer; margin: 10px 5px; }
+        button:hover { background: #0066cc; }
+        #finalAnswerDisplay { background: #333; border: 2px solid #00ff00; padding: 20px; margin: 20px 0; border-radius: 5px; min-height: 50px; }
+    </style>
+</head>
+<body>
+    <h1>Final Answer Debug Test</h1>
+    <button onclick="testSimpleQuery()">Test Simple Query (2+2)</button>
+    <button onclick="clearOutput()">Clear</button>
+    
+    <h2>Final Answer Display:</h2>
+    <div id="finalAnswerDisplay">No final answer yet...</div>
+    
+    <h2>Event Log:</h2>
+    <div id="output"></div>
+
+    <script>
+        const API_URL = 'http://localhost:8000';
+        let currentEventSource = null;
+        let finalAnswerContent = '';
+
+        function addEvent(content, isError = false) {
+            const output = document.getElementById('output');
+            const div = document.createElement('div');
+            div.className = isError ? 'event debug' : 'event';
+            
+            const timestamp = new Date().toLocaleTimeString();
+            div.innerHTML = `<strong>${timestamp}</strong>: ${content}`;
+            
+            output.appendChild(div);
+            output.scrollTop = output.scrollHeight;
+        }
+
+        function updateFinalAnswer(content) {
+            finalAnswerContent += content;
+            const display = document.getElementById('finalAnswerDisplay');
+            display.innerHTML = finalAnswerContent || 'No final answer yet...';
+            addEvent(`✅ Final answer updated with: "${content}"`, false);
+        }
+
+        async function testSimpleQuery() {
+            finalAnswerContent = '';
+            document.getElementById('finalAnswerDisplay').innerHTML = 'Waiting for answer...';
+            
+            if (currentEventSource) {
+                currentEventSource.close();
+            }
+
+            try {
+                addEvent('🧪 Testing simple query: "What is 2+2?"');
+                
+                // Create query
+                const queryResponse = await fetch(`${API_URL}/v1/query`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        query: 'What is 2+2?',
+                        model: 'o4-mini'
+                    })
+                });
+                
+                if (!queryResponse.ok) {
+                    throw new Error(`HTTP ${queryResponse.status}: ${queryResponse.statusText}`);
+                }
+                
+                const queryData = await queryResponse.json();
+                addEvent(`✅ Query created with run_id: ${queryData.run_id}`);
+                
+                // Listen to event stream
+                currentEventSource = new EventSource(`${API_URL}/v1/stream/${queryData.run_id}`);
+                
+                currentEventSource.onmessage = (event) => {
+                    try {
+                        const data = JSON.parse(event.data);
+                        
+                        // Log all events
+                        addEvent(`📡 Event: ${data.type} - ${JSON.stringify(data)}`);
+                        
+                        switch (data.type) {
+                            case 'final_answer':
+                                const finalContent = data.text || data.content;
+                                addEvent(`🎯 Final answer event received: "${finalContent}"`, false);
+                                updateFinalAnswer(finalContent);
+                                break;
+                            case 'thought':
+                                addEvent(`🧠 Thought: ${data.text}`);
+                                break;
+                            case 'complete':
+                                addEvent('✅ Query completed!');
+                                currentEventSource.close();
+                                break;
+                            case 'error':
+                                addEvent(`❌ Error: ${data.message}`, true);
+                                currentEventSource.close();
+                                break;
+                        }
+                    } catch (e) {
+                        addEvent(`❌ Error parsing event: ${e.message}`, true);
+                    }
+                };
+                
+                currentEventSource.onerror = (error) => {
+                    addEvent('❌ Event stream error occurred', true);
+                    currentEventSource.close();
+                };
+                
+            } catch (error) {
+                addEvent(`❌ Error: ${error.message}`, true);
+            }
+        }
+
+        function clearOutput() {
+            document.getElementById('output').innerHTML = '';
+            finalAnswerContent = '';
+            document.getElementById('finalAnswerDisplay').innerHTML = 'No final answer yet...';
+            if (currentEventSource) {
+                currentEventSource.close();
+            }
+        }
+    </script>
+</body>
+</html>
