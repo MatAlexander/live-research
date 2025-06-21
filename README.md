@@ -83,7 +83,7 @@ pip install -r requirements.txt
 Create `.env` file in the backend directory:
 
 ```env
-***REMOVED***
+OPENAI_API_KEY=your_openai_api_key_here
 GOOGLE_SEARCH_API_KEY=your_google_api_key_here
 GOOGLE_SEARCH_CX=your_custom_search_engine_id
 DATABASE_URL=postgresql://user:password@localhost/live_thought
