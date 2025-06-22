@@ -2,13 +2,13 @@ import os
 import asyncio
 import logging
 import json
+import time
 from typing import Dict, List, AsyncGenerator, Optional
 from datetime import datetime
 from collections import defaultdict
 from urllib.parse import urlparse
 
-import openai
-from openai import OpenAI
+from openai import AsyncOpenAI
 
 from models.schemas import (
     ThoughtEvent, PageEvent, TokenEvent, CitationEvent, ErrorEvent,
@@ -26,8 +26,8 @@ class AgentService:
         self.scraper_service = scraper_service
         self.embedding_service = embedding_service
         
-        # Initialize OpenAI client
-        self.client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+        # Initialize asynchronous OpenAI client to avoid blocking the asyncio event loop
+        self.client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
         # Default model can be overridden per query
         self.default_chat_model = os.getenv("OPENAI_CHAT_MODEL", "o4-mini")
         
@@ -41,6 +41,25 @@ class AgentService:
         # Rate limits
         self.max_google_queries = int(os.getenv("MAX_GOOGLE_QUERIES", "5"))
         self.max_selenium_fetches = int(os.getenv("MAX_SELENIUM_FETCHES", "10"))
+        
+        # Timing tracking for debugging
+        self.timing_logs: Dict[str, Dict[str, float]] = {}
+    
+    def _log_timing(self, run_id: str, event: str, details: str = ""):
+        """Log timing information for debugging"""
+        if run_id not in self.timing_logs:
+            self.timing_logs[run_id] = {"start_time": time.time()}
+        
+        current_time = time.time()
+        elapsed = (current_time - self.timing_logs[run_id]["start_time"]) * 1000  # milliseconds
+        
+        self.timing_logs[run_id][event] = elapsed
+        logger.info(f"⏱️  [{run_id[:8]}] [{elapsed:>8.2f}ms] {event}: {details}")
+        
+        # Also write to timing log file
+        timing_file = f"timing_{run_id}.log"
+        with open(timing_file, "a") as f:
+            f.write(f"{elapsed:>8.2f}ms | {event} | {details}\n")
     
     async def _emit_event(self, run_id: str, event: dict):
         """Emit an event to the run's queue"""
@@ -48,6 +67,11 @@ class AgentService:
             event["timestamp"] = datetime.now().isoformat()
             event["run_id"] = run_id
             await self.event_queues[run_id].put(event)
+            
+            # Log timing for event emission
+            event_type = event.get("type", "unknown")
+            content_preview = str(event.get("content", event.get("text", event.get("message", ""))))[:50]
+            self._log_timing(run_id, f"EMIT_{event_type.upper()}", content_preview)
             
             # Log event for observability
             logger.info(f"Event emitted for {run_id}: {event['type']} - {event.get('text', event.get('action', ''))[:100]}")
@@ -69,19 +93,26 @@ class AgentService:
         chat_model = model or self.default_chat_model
         logger.info(f"Processing query with model: {chat_model}")
         
-        # Initialize event queue
-        self.event_queues[run_id] = asyncio.Queue()
+        # Initialize timing and event queue
+        self._log_timing(run_id, "PROCESS_START", f"Query: {query[:50]}...")
+        
+        # Initialize event queue if not already created (e.g., if the client subscribed first)
+        if run_id not in self.event_queues:
+            self.event_queues[run_id] = asyncio.Queue()
         self.active_runs[run_id] = True
         self.final_answer_sent[run_id] = False
         
         try:
             logger.info(f"🚀 Starting agent processing for {run_id}")
+            self._log_timing(run_id, "AGENT_START", "Agent processing initialized")
             
             # Check if this is a simple test query (like "What is 2+2?")
             is_simple_test = query.lower().strip() in ["what is 2+2?", "2+2", "test"]
             
             if is_simple_test:
                 logger.info(f"🧪 Running simple test mode for {run_id}")
+                self._log_timing(run_id, "SIMPLE_TEST_MODE", "Bypassing search/scraping")
+                
                 await self._emit_event(run_id, {
                     "type": "thought",
                     "text": "🧪 Test mode: Bypassing search and scraping for simple query..."
@@ -92,6 +123,8 @@ class AgentService:
                     "type": "thought",
                     "text": "🧠 Generating response using OpenAI..."
                 })
+                
+                self._log_timing(run_id, "OPENAI_START", "Starting direct OpenAI processing")
                 
                 # Simple system prompt for test
                 system_prompt = (
@@ -134,8 +167,9 @@ class AgentService:
     
     async def get_event_stream(self, run_id: str) -> AsyncGenerator[dict, None]:
         """Get event stream for a specific run_id"""
-        if run_id not in self.event_queues:
-            self.event_queues[run_id] = asyncio.Queue()
+        # Wait until the producer has created the queue to avoid race conditions
+        while run_id not in self.event_queues:
+            await asyncio.sleep(0.05)
         
         queue = self.event_queues[run_id]
         
@@ -256,17 +290,29 @@ class AgentService:
 
     async def _process_full_query(self, run_id: str, query: str, chat_model: str):
         """Process a full query with search and scraping"""
+        self._log_timing(run_id, "FULL_QUERY_START", "Starting full query processing")
+        
         # Track rate limits
         google_query_count = 0
         selenium_fetch_count = 0
+
+        # NEW: counters to keep embedding/API usage under control
+        pages_scraped = 0
+        total_chunks_created = 0
+        max_pages = int(os.getenv("MAX_PAGES_SCRAPED", "10"))
+        max_chunks = int(os.getenv("MAX_EMBEDDING_CHUNKS", "500"))
+
         citations = []
         
         logger.info(f"📊 Step 1: Starting search and scraping for {run_id}")
+        self._log_timing(run_id, "SEARCH_PHASE_START", "Beginning search phase")
         
         # Don't clear embeddings - reuse existing ones to save costs
         # self.embedding_service.clear_database()  # Commented out to prevent excessive API calls
         
         # Step 1: Initial search
+        self._log_timing(run_id, "GOOGLE_SEARCH_START", f"Searching for: {query[:50]}")
+        
         await self._emit_event(run_id, {
             "type": "tool_use",
             "tool": "google_search",
@@ -278,6 +324,8 @@ class AgentService:
             search_results = await self.search_service.google_search(query, k=5)
             google_query_count += 1
             
+            self._log_timing(run_id, "GOOGLE_SEARCH_COMPLETE", f"Found {len(search_results)} results")
+            
             await self._emit_event(run_id, {
                 "type": "tool_result",
                 "tool": "google_search",
@@ -285,10 +333,15 @@ class AgentService:
             })
             
             # Step 2: Fetch and process pages
-            for result in search_results[:3]:  # Limit to top 3 results
-                if selenium_fetch_count >= self.max_selenium_fetches:
+            self._log_timing(run_id, "SCRAPING_PHASE_START", f"Beginning scraping of {len(search_results[:3])} pages")
+            
+            for idx, result in enumerate(search_results[:3]):  # Limit to top 3 results
+                # Respect global page & selenium limits
+                if (selenium_fetch_count >= self.max_selenium_fetches) or (pages_scraped >= max_pages):
                     break
                     
+                self._log_timing(run_id, f"SCRAPE_PAGE_{idx+1}_START", result.url)
+                
                 await self._emit_event(run_id, {
                     "type": "tool_use",
                     "tool": "web_scraper", 
@@ -305,6 +358,7 @@ class AgentService:
                 content = await self.scraper_service.selenium_fetch(result.url)
                 if content:
                     selenium_fetch_count += 1
+                    self._log_timing(run_id, f"SCRAPE_PAGE_{idx+1}_COMPLETE", f"Scraped {len(content)} chars")
                     
                     # Get page title
                     title = await self.scraper_service.get_page_title(result.url)
@@ -323,23 +377,36 @@ class AgentService:
                         "details": f"Processing content from {title}"
                     })
                     
-                    chunks = await self.embedding_service.embed_and_store(
-                        content, result.url, title
-                    )
-                    
-                    if chunks:
-                        await self._emit_event(run_id, {
-                            "type": "tool_result",
-                            "tool": "embedding",
-                            "result": f"Created {len(chunks)} text embeddings"
-                        })
-                        
-                        # Add to citations
-                        citations.append({
-                            "url": result.url,
-                            "title": title,
-                            "favicon": f"https://www.google.com/s2/favicons?domain={urlparse(result.url).netloc}"
-                        })
+                    chunks = []
+                    # Only embed if we haven't exceeded chunk budget
+                    if total_chunks_created < max_chunks:
+                        remaining_budget = max_chunks - total_chunks_created
+                        chunks = await self.embedding_service.embed_and_store(
+                            content, result.url, title
+                        )
+                        if len(chunks) > remaining_budget:
+                            chunks = chunks[:remaining_budget]
+
+                    # Log / emit results even if we skipped embedding
+                    created = len(chunks)
+                    total_chunks_created += created
+
+                    await self._emit_event(run_id, {
+                        "type": "tool_result",
+                        "tool": "embedding",
+                        "result": f"Created {created} text embeddings (total so far: {total_chunks_created})"
+                    })
+
+                    # Add to citations list regardless
+                    citations.append({
+                        "url": result.url,
+                        "title": title,
+                        "favicon": f"https://www.google.com/s2/favicons?domain={urlparse(result.url).netloc}"
+                    })
+
+                    pages_scraped += 1
+
+                    # keep pages_scraped counter increment, no additional processing here
                 else:
                     await self._emit_event(run_id, {
                         "type": "tool_result",
@@ -365,11 +432,7 @@ class AgentService:
         
         logger.info(f"🤖 Step 2: Starting OpenAI processing for {run_id}")
         
-        # Step 4: Generate answer using OpenAI
-        await self._emit_event(run_id, {
-            "type": "thought",
-            "text": "Generating comprehensive answer..."
-        })
+        # Step 4: Generate answer using OpenAI (no generic placeholder thought events)
         
         # Emit citations
         for citation in citations:
@@ -429,10 +492,11 @@ class AgentService:
     async def _process_openai_stream(self, run_id: str, messages: list, chat_model: str):
         """Process OpenAI streaming response"""
         logger.info(f"🌊 Creating OpenAI stream for {run_id}")
+        self._log_timing(run_id, "OPENAI_STREAM_START", f"Creating stream with model: {chat_model}")
         
-        # Stream response from OpenAI with selected model
+        # Stream response from OpenAI with selected model (async version)
         try:
-            stream = self.client.chat.completions.create(
+            stream = await self.client.chat.completions.create(
                 model=chat_model,
                 messages=messages,
                 stream=True,
@@ -440,8 +504,10 @@ class AgentService:
                 # Note: o4-mini only supports default temperature (1)
             )
             logger.info(f"✅ OpenAI stream created successfully for {run_id}")
+            self._log_timing(run_id, "OPENAI_STREAM_CREATED", "Stream object created, beginning iteration")
         except Exception as e:
             logger.error(f"❌ Failed to create OpenAI stream for {run_id}: {e}")
+            self._log_timing(run_id, "OPENAI_STREAM_ERROR", str(e))
             await self._emit_event(run_id, {
                 "type": "error",
                 "message": f"OpenAI API error: {str(e)}"
@@ -452,6 +518,7 @@ class AgentService:
         accumulated_content = ""
         thought_count = 0
         max_thoughts = 50  # Prevent infinite thoughts
+        token_count = 0
         
         # Setup detailed logging for streaming
         log_file_path = f"ai_stream_{run_id}.log"
@@ -462,29 +529,28 @@ class AgentService:
             log_file.write("=" * 50 + "\n\n")
         
         logger.info(f"🎯 Starting stream processing for {run_id}")
+        self._log_timing(run_id, "OPENAI_ITERATION_START", "Beginning to process stream chunks")
         
-        # Initial processing thoughts to test real-time streaming
-        await self._emit_event(run_id, {
-            "type": "thought",
-            "text": "🔍 Analyzing information and context..."
-        })
-        
-        await asyncio.sleep(1)  # Small delay to see real-time effect
-        
-        await self._emit_event(run_id, {
-            "type": "thought",
-            "text": "🧠 Processing information and generating comprehensive response..."
-        })
-        
-        await asyncio.sleep(1)
+        # Remove artificial initial thoughts; the stream will immediately start with real model output
         
         chunk_count = 0
-        for chunk in stream:
+        first_chunk_received = False
+        async for chunk in stream:
             chunk_count += 1
+            
+            if not first_chunk_received:
+                first_chunk_received = True
+                self._log_timing(run_id, "FIRST_OPENAI_CHUNK", "First chunk received from OpenAI")
+            
             if chunk.choices[0].delta.content:
                 content = chunk.choices[0].delta.content
                 current_line += content
                 accumulated_content += content
+                token_count += 1
+                
+                # Log timing for first few tokens and every 50th token
+                if token_count <= 5 or token_count % 50 == 0:
+                    self._log_timing(run_id, f"TOKEN_{token_count}", f"Content: {content[:20]}...")
                 
                 # Log every chunk received
                 with open(log_file_path, "a") as log_file:
@@ -513,27 +579,36 @@ class AgentService:
                 
                 if thought_count > max_thoughts:
                     break
+                
+                # Emit each raw chunk as a token event. Differentiate between
+                # tokens that are part of the final answer vs. reasoning/thoughts
+                final_mode_dict = getattr(self, "_final_mode", {})
+                event_type = "final_answer_token" if final_mode_dict.get(run_id, False) else "token"
+                await self._emit_event(run_id, {
+                    "type": event_type,
+                    "text": content
+                })
         
-        # Log final state
-        with open(log_file_path, "a") as log_file:
-            log_file.write(f"\n=== PROCESSING FINAL ACCUMULATED CONTENT ===\n")
-            log_file.write(f"FINAL ACCUMULATED: '{accumulated_content}'\n")
+        self._log_timing(run_id, "OPENAI_STREAM_COMPLETE", f"Processed {chunk_count} chunks, {token_count} tokens")
         
-        # Process the final accumulated content for THOUGHT and FINAL statements
-        if accumulated_content.strip():
-            await self._process_accumulated_content(run_id, accumulated_content, log_file_path)
+        # If anything remains in current_line (no trailing newline), process it once
+        if current_line.strip():
+            self._log_timing(run_id, "FINAL_LINE_PROCESSING", current_line.strip()[:50])
+            await self._process_reasoning_line(run_id, current_line.strip())
         
         logger.info(f"Streaming complete for {run_id}. Log saved to: {log_file_path}")
         
         # Check if final answer was sent, if not, send a fallback
         if not self.final_answer_sent.get(run_id, False):
             logger.warning(f"No final answer was sent for {run_id}, sending fallback")
+            self._log_timing(run_id, "FALLBACK_FINAL_ANSWER", "No final answer detected, sending fallback")
             await self._emit_event(run_id, {
                 "type": "final_answer",
                 "text": "I have completed my research and analysis. Please refer to my thoughts above for the comprehensive findings."
             })
         
         # Mark completion
+        self._log_timing(run_id, "PROCESSING_COMPLETE", "All processing finished")
         await self._emit_event(run_id, {
             "type": "complete",
             "text": "Answer complete"

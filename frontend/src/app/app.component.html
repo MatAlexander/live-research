@@ -1,236 +1,81 @@
-<!-- AI Thinking Agent Main Interface -->
-<div class="min-h-screen bg-slate-900 text-white overflow-hidden relative">
-  <!-- Neural Network Animated Background -->
-  <div class="neural-bg">
-    <div class="particle"></div>
-    <div class="particle"></div>
-    <div class="particle"></div>
-  </div>
-  
-  <!-- Layered background gradients -->
-  <div class="fixed inset-0 bg-gradient-to-br from-slate-900 via-blue-950 to-purple-950"></div>
-  <div class="fixed inset-0 bg-[radial-gradient(circle_at_30%_40%,rgba(14,165,233,0.15),transparent)]"></div>
-  <div class="fixed inset-0 bg-[radial-gradient(circle_at_70%_60%,rgba(139,92,246,0.1),transparent)]"></div>
-  <div class="fixed inset-0 bg-[conic-gradient(from_230.29deg_at_51.63%_52.16%,rgba(14,165,233,0.1)_0deg,rgba(139,92,246,0.1)_72.5deg,rgba(6,182,212,0.1)_144deg,rgba(14,165,233,0.1)_216deg,rgba(139,92,246,0.1)_288deg,rgba(14,165,233,0.1)_360deg)]"></div>
-  
+<div class="app-container">
   <!-- Header -->
-  <header class="relative z-10 border-b border-sky-500/20 glass-panel">
-    <div class="px-6 py-4">
-      <h1 class="text-2xl font-bold bg-gradient-to-r from-sky-400 via-purple-400 to-cyan-400 bg-clip-text text-transparent gradient-animate">
-        {{ title }}
-      </h1>
-    </div>
+  <header class="app-header">
+    <img src="/public/favicon.ico" alt="Logo" class="logo">
+    <h1>Live-Thought Research Assistant</h1>
   </header>
 
-  <!-- Main Content - Three Panel Layout -->
-  <div class="relative z-10 flex h-[calc(100vh-80px)] min-h-0">
-    
-    <!-- Left Panel - Query Input & Controls -->
-    <div class="w-1/4 flex-shrink-0 border-r border-sky-500/20 glass-panel p-6">
-      <div class="space-y-6">
-        <!-- Query Input -->
-        <div class="space-y-3">
-          <label class="block text-sm font-medium text-white">Ask the AI Agent</label>
-          <textarea
-            [(ngModel)]="query"
-            [disabled]="isLoading"
-            class="w-full h-32 bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white placeholder-slate-400 focus:border-sky-400/50 focus:ring-2 focus:ring-sky-400/20 resize-none backdrop-blur-sm transition-all duration-200"
-            placeholder="Enter your question or research topic..."
-          ></textarea>
-        </div>
-
-        <!-- Model Selection -->
-        <div class="space-y-3">
-          <label class="block text-sm font-medium text-white">AI Model</label>
-          <select
-            [(ngModel)]="selectedModel"
-            [disabled]="isLoading"
-            class="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white focus:border-sky-400/50 focus:ring-2 focus:ring-sky-400/20 backdrop-blur-sm transition-all duration-200"
-          >
-            <option *ngFor="let model of availableModels" [value]="model.value">
-              {{ model.label }}
-            </option>
-          </select>
-        </div>
-
-        <!-- Action Buttons -->
-        <div class="space-y-3">
-          <button
-            (click)="submitQuery()"
-            [disabled]="!query.trim() || isLoading"
-            class="w-full bg-gradient-to-r from-sky-500 to-purple-600 hover:from-sky-600 hover:to-purple-700 disabled:from-slate-600 disabled:to-slate-700 disabled:cursor-not-allowed px-6 py-3 rounded-xl font-medium transition-all duration-200 shadow-lg hover:shadow-sky-500/25 transform hover:scale-105 disabled:hover:scale-100"
-          >
-            <span *ngIf="!isLoading">✨ Start Research</span>
-            <span *ngIf="isLoading" class="flex items-center justify-center">
-              <svg class="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-              </svg>
-              Processing...
-            </span>
-          </button>
-
-          <button
-            (click)="testConnection()"
-            class="w-full bg-white/5 hover:bg-white/10 px-6 py-2 rounded-xl font-medium transition-all duration-200 border border-white/10 hover:border-white/20 text-slate-200"
-          >
-            🧪 Test Connection
-          </button>
-
-          <button
-            (click)="clearHistory()"
-            class="w-full bg-white/5 hover:bg-white/10 px-6 py-2 rounded-xl font-medium transition-all duration-200 border border-white/10 hover:border-white/20 text-slate-200"
-          >
-            🗑️ Clear History
-          </button>
-
-          <button
-            (click)="addTestThought()"
-            class="w-full bg-yellow-600 hover:bg-yellow-700 px-6 py-2 rounded-xl font-medium transition-all duration-200 text-white"
-          >
-            🧪 Add Test Thought
-          </button>
-
-          <button
-            (click)="testSimpleStream()"
-            class="w-full bg-green-600 hover:bg-green-700 px-6 py-2 rounded-xl font-medium transition-all duration-200 text-white"
-          >
-            🔧 Test Stream
-          </button>
-        </div>
-
-        <!-- Status -->
-        <div class="bg-white/5 rounded-xl p-4 border border-white/10">
-          <div class="text-sm text-slate-300 space-y-2">
-            <div class="flex items-center justify-between">
-              <span>Model:</span> 
-              <span class="text-sky-400 font-mono text-xs">{{ selectedModel }}</span>
-            </div>
-            <div class="flex items-center justify-between">
-              <span>Status:</span>
-              <span class="flex items-center" [class]="isLoading ? 'text-amber-400' : 'text-emerald-400'">
-                <div *ngIf="isLoading" class="w-2 h-2 bg-amber-400 rounded-full animate-pulse mr-2"></div>
-                <div *ngIf="!isLoading" class="w-2 h-2 bg-emerald-400 rounded-full mr-2"></div>
-                {{ isLoading ? 'Processing' : 'Ready' }}
-              </span>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- Center Panel - Thinking Stream -->
-    <div class="flex-1 min-w-0 glass-panel p-6">
-      <div class="h-full flex flex-col">
-        <h2 class="text-lg font-semibold text-white mb-6 flex items-center">
-          <svg class="w-5 h-5 mr-2 text-sky-400" fill="currentColor" viewBox="0 0 20 20">
-            <path d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
-          </svg>
-          Thinking
-          <span class="ml-2 text-xs text-slate-400">({{ thoughts.length }} thoughts)</span>
-        </h2>
-        
-        <div class="flex-1 overflow-y-auto space-y-4 custom-scrollbar">
-          <div *ngIf="thoughts.length === 0 && !isLoading" 
-               class="text-center text-slate-400 mt-20">
-            <div class="text-6xl mb-4">🧠</div>
-            <p>The AI's thinking process will appear here...</p>
-          </div>
-
-          <!-- Thinking Container - ChatGPT Style -->
-          <div *ngIf="thoughts.length > 0 || isLoading" class="chatgpt-thinking-container">
-            <div class="thinking-header">
-              <div class="thinking-icon">
-                <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
-                  <path fill-rule="evenodd" d="M11.49 3.17c-.38-1.56-2.6-1.56-2.98 0a1.532 1.532 0 01-2.286.948c-1.372-.836-2.942.734-2.106 2.106.54.886.061 2.042-.947 2.287-1.561.379-1.561 2.6 0 2.978a1.532 1.532 0 01.947 2.287c-.836 1.372.734 2.942 2.106 2.106a1.532 1.532 0 012.287.947c.379 1.561 2.6 1.561 2.978 0a1.533 1.533 0 012.287-.947c1.372.836 2.942-.734 2.106-2.106a1.533 1.533 0 01.947-2.287c1.561-.379 1.561-2.6 0-2.978a1.532 1.532 0 01-.947-2.287c.836-1.372-.734-2.942-2.106-2.106a1.532 1.532 0 01-2.287-.947zM10 13a3 3 0 100-6 3 3 0 000 6z" clip-rule="evenodd"/>
-                </svg>
-              </div>
-              <span class="thinking-title">Thinking...</span>
-              <div *ngIf="isLoading" class="thinking-spinner">
-                <div class="spinner"></div>
-              </div>
-            </div>
-            
-            <div class="thinking-content">
-              <div *ngFor="let thought of thoughts; trackBy: trackByIndex" 
-                   class="thought-item">
-                <div class="thought-text">{{ thought.content }}</div>
-              </div>
-
-              <div *ngIf="isLoading" class="thought-item loading">
-                <div class="loading-dots">
-                  <span></span>
-                  <span></span>
-                  <span></span>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- Right Panel - Answer & Citations -->
-    <div class="w-1/3 flex-shrink-0 border-l border-sky-500/20 glass-panel p-6 flex flex-col">
-      <div class="h-full flex flex-col space-y-6">
-        
-        <!-- Answer Section -->
-        <div class="flex-1 min-h-0">
-          <h2 class="text-lg font-semibold text-white mb-6 flex items-center">
-            <svg class="w-5 h-5 mr-2 text-sky-400" fill="currentColor" viewBox="0 0 20 20">
-              <path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-8-3a1 1 0 00-.867.5 1 1 0 11-1.731-1A3 3 0 0113 8a3.001 3.001 0 01-2 2.83V11a1 1 0 11-2 0v-1a1 1 0 011-1 1 1 0 100-2zm0 8a1 1 0 100-2 1 1 0 000 2z" clip-rule="evenodd"/>
-            </svg>
-            Answer
-            <span *ngIf="finalAnswer" class="ml-2 text-xs text-slate-400">({{ finalAnswer.length }} chars)</span>
-          </h2>
-          
-          <div class="chatgpt-answer-container h-full min-h-[300px]">
-            <div *ngIf="!finalAnswer && !isLoading" class="answer-empty-state">
-              <div class="text-4xl mb-4">💡</div>
-              <p>The AI's answer will appear here...</p>
-            </div>
-            
-            <!-- Show final answer -->
-            <div *ngIf="finalAnswer" class="answer-content">
-              <div class="answer-text">{{ finalAnswer }}</div>
-            </div>
-
-            <div *ngIf="isLoading && !finalAnswer" class="answer-loading">
-              <div class="loading-spinner"></div>
-              <span>Researching and generating answer...</span>
-            </div>
-          </div>
-        </div>
-
-        <!-- Citations Section -->
-        <div class="h-64 flex-shrink-0">
-          <h2 class="text-lg font-semibold text-white mb-6 flex items-center">
-            <svg class="w-5 h-5 mr-2 text-sky-400" fill="currentColor" viewBox="0 0 20 20">
-              <path fill-rule="evenodd" d="M12.586 4.586a2 2 0 112.828 2.828l-3 3a2 2 0 01-2.828 0 1 1 0 00-1.414 1.414 4 4 0 005.656 0l3-3a4 4 0 00-5.656-5.656l-1.5 1.5a1 1 0 101.414 1.414l1.5-1.5zm-5 5a2 2 0 012.828 0 1 1 0 101.414-1.414 4 4 0 00-5.656 0l-3 3a4 4 0 105.656 5.656l1.5-1.5a1 1 0 10-1.414-1.414l-1.5 1.5a2 2 0 11-2.828-2.828l3-3z" clip-rule="evenodd"/>
-            </svg>
-            Sources
-          </h2>
-          
-          <div class="chatgpt-citations-container h-full">
-            <div *ngIf="citations.length === 0" class="citations-empty-state">
-              <div class="text-3xl mb-2">📚</div>
-              <p class="text-sm">Citations will appear here...</p>
-            </div>
-
-            <div class="citations-content">
-              <div *ngFor="let citation of citations; trackBy: trackByCitation" 
-                   class="citation-item">
-                <h4 class="citation-title">{{ citation.title }}</h4>
-                <a [href]="citation.url" target="_blank" 
-                   class="citation-url">
-                  {{ citation.url }}
-                </a>
-                <p class="citation-snippet">{{ citation.snippet }}</p>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
+  <!-- Query Input -->
+  <div class="query-container">
+    <input
+      type="text"
+      class="query-input"
+      placeholder="Ask a research question..."
+      [(ngModel)]="query"
+      (keyup.enter)="startSearch()"
+      [disabled]="isLoading"
+    />
+    <button (click)="startSearch()" [disabled]="isLoading" class="query-button">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd" /></svg>
+    </button>
   </div>
+
+  <!-- Main Content Area -->
+  <main class="main-content">
+    <!-- Answer Panel -->
+    <div class="panel answer-panel">
+      <div class="panel-header">
+        <h2>Answer</h2>
+      </div>
+      <div class="panel-content">
+        <div *ngIf="finalAnswer" class="prose" [innerHTML]="finalAnswer"></div>
+        <div *ngIf="!finalAnswer && !isLoading" class="empty-state">
+          <p>Your research answer will appear here.</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Right Column (Thoughts & Citations) -->
+    <div class="right-column">
+      <!-- Thoughts Panel -->
+      <div class="panel thoughts-panel">
+        <div class="panel-header">
+          <h2>Thoughts</h2>
+          <div *ngIf="isLoading" class="loader-container">
+            <div class="square-loader">
+              <div class="dot dot-1"></div>
+              <div class="dot dot-2"></div>
+              <div class="dot dot-3"></div>
+            </div>
+          </div>
+        </div>
+        <div class="panel-content thought-list">
+          <div *ngIf="liveThought" class="thought-item live-thought">{{ liveThought }}</div>
+          <div *ngIf="thoughts.length === 0 && !isLoading" class="empty-state">
+            <p>The agent's reasoning process will appear here.</p>
+          </div>
+          <div *ngFor="let thought of thoughts" class="thought-item">
+            {{ thought }}
+          </div>
+        </div>
+      </div>
+
+      <!-- Citations Panel -->
+      <div class="panel citations-panel">
+        <div class="panel-header">
+          <h2>Citations</h2>
+        </div>
+        <div class="panel-content">
+          <div *ngIf="citations.length === 0" class="empty-state">
+            <p>Cited sources will appear here.</p>
+          </div>
+          <div *ngFor="let citation of citations" class="citation-item">
+            <a [href]="citation.url" target="_blank">{{ citation.title }}</a>
+          </div>
+        </div>
+      </div>
+    </div>
+  </main>
 </div>
+
+

@@ -40,15 +40,11 @@ export class AgentService {
       eventSource.onmessage = (event) => {
         this.ngZone.run(() => {
           try {
-            console.log('🔥 Raw EventSource data:', event.data);
             const data = JSON.parse(event.data);
-            console.log('🔥 Parsed EventSource data:', data);
-            console.log('🔥 Event type:', data.type);
-            console.log('🔥 Event content:', data.text || data.content || 'No text/content');
+            console.log('🔥 EventSource received:', data.type);
             observer.next(data);
             
             if (data.type === 'complete' || data.type === 'error') {
-              console.log('🔥 Stream complete, closing EventSource');
               eventSource.close();
               observer.complete();
             }
