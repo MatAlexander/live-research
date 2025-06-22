@@ -1,7 +1,6 @@
 import { Component, OnInit, OnDestroy, ChangeDetectorRef } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { RouterOutlet } from '@angular/router';
 import { AgentService } from './services/agent.service';
 import { Subscription } from 'rxjs';
 import { switchMap, tap } from 'rxjs/operators';
@@ -52,7 +51,7 @@ interface Citation {
 @Component({
   selector: 'app-root',
   standalone: true,
-  imports: [CommonModule, RouterOutlet, FormsModule],
+  imports: [CommonModule, FormsModule],
   templateUrl: './app.component.html',
   styleUrl: './app.component.scss'
 })

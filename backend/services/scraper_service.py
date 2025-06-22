@@ -5,40 +5,21 @@ from typing import Optional
 from urllib.parse import urljoin, urlparse
 import time
 
-from selenium import webdriver
-from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.chrome.service import Service
-from webdriver_manager.chrome import ChromeDriverManager
-from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
+import aiohttp
+import requests
 from bs4 import BeautifulSoup
 import trafilatura
-import requests
 
 logger = logging.getLogger(__name__)
 
 class ScraperService:
     def __init__(self):
-        self.driver = None
+        self.scrape_do_token = os.getenv("SCRAPE_DO_TOKEN", "feb4f86327e14e9d9f92036d4167ac51b4e35ccd880")
         self.domain_last_request = {}
         self.min_delay_per_domain = 1.0  # 1 second between requests to same domain
         
-    async def _init_driver(self):
-        """Initialize Chrome driver if not already done"""
-        if self.driver is None:
-            chrome_options = Options()
-            chrome_options.add_argument("--headless")
-            chrome_options.add_argument("--no-sandbox")
-            chrome_options.add_argument("--disable-dev-shm-usage")
-            chrome_options.add_argument("--disable-gpu")
-            chrome_options.add_argument("--window-size=1920,1080")
-            chrome_options.add_argument("--user-agent=Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36")
-            
-            service = Service(ChromeDriverManager().install())
-            self.driver = webdriver.Chrome(service=service, options=chrome_options)
-            logger.info("Chrome driver initialized")
-
+        # Scrape.do base URL
+        self.scrape_do_url = "http://api.scrape.do"
     async def _check_robots_txt(self, url: str) -> bool:
         """Check if URL is allowed by robots.txt"""
         try:
@@ -47,11 +28,24 @@ class ScraperService:
             
             response = requests.get(robots_url, timeout=5)
             if response.status_code == 200:
-                # Simple check - in production you'd want proper robots.txt parsing
                 content = response.text.lower()
-                if "user-agent: *" in content and "disallow: /" in content:
-                    logger.warning(f"Robots.txt disallows scraping for {url}")
-                    return False
+                path = parsed_url.path or "/"
+                
+                # Check for specific disallow rules that match our path
+                lines = content.split('\n')
+                user_agent_applies = False
+                
+                for line in lines:
+                    line = line.strip()
+                    if line.startswith('user-agent:'):
+                        agent = line.split(':', 1)[1].strip()
+                        user_agent_applies = agent == '*' or 'scraperapi' in agent
+                    elif user_agent_applies and line.startswith('disallow:'):
+                        disallow_path = line.split(':', 1)[1].strip()
+                        # Only block if there's an exact "disallow: /" or our path matches
+                        if disallow_path == "/" or (disallow_path and path.startswith(disallow_path)):
+                            logger.warning(f"Robots.txt disallows path {path} for {url}")
+                            return False
             return True
         except Exception as e:
             logger.debug(f"Could not check robots.txt for {url}: {e}")
@@ -69,81 +63,86 @@ class ScraperService:
         
         self.domain_last_request[domain] = time.time()
 
-    async def selenium_fetch(self, url: str) -> Optional[str]:
+    def scrapedo_fetch(self, url: str) -> Optional[str]:
         """
-        Fetch page content using Selenium with headless Chrome
+        Fetch page content using scrape.do (synchronous, requests-based)
         """
         try:
-            # Check robots.txt
-            if not await self._check_robots_txt(url):
-                return None
-            
             # Rate limiting
-            await self._rate_limit_domain(url)
-            
-            # Initialize driver if needed
-            await self._init_driver()
-            
-            logger.info(f"Fetching page: {url}")
-            
-            # Navigate to page
-            self.driver.get(url)
-            
-            # Wait for network idle (simplified - wait for page load)
-            WebDriverWait(self.driver, 10).until(
-                lambda driver: driver.execute_script("return document.readyState") == "complete"
-            )
-            
-            # Additional wait for dynamic content
-            await asyncio.sleep(2)
-            
-            # Get page source
-            html_content = self.driver.page_source
-            
-            # Extract clean text using trafilatura
-            clean_text = trafilatura.extract(html_content)
-            
-            if clean_text:
-                logger.info(f"Successfully extracted {len(clean_text)} characters from {url}")
-                return clean_text
+            self._rate_limit_domain_sync(url)
+
+            logger.info(f"Fetching page with scrape.do: {url}")
+            scrape_url = f"{self.scrape_do_url}?token={self.scrape_do_token}&url={url}"
+            response = requests.get(scrape_url, timeout=30)
+            if response.status_code == 200:
+                html_content = response.text
+                # Extract clean text using trafilatura
+                clean_text = trafilatura.extract(html_content)
+                if clean_text:
+                    logger.info(f"Successfully extracted {len(clean_text)} characters from {url}")
+                    return clean_text
+                else:
+                    # Fallback to BeautifulSoup
+                    soup = BeautifulSoup(html_content, 'html.parser')
+                    for script in soup(["script", "style"]):
+                        script.decompose()
+                    text = soup.get_text()
+                    lines = (line.strip() for line in text.splitlines())
+                    chunks = (phrase.strip() for line in lines for phrase in line.split("  "))
+                    text = ' '.join(chunk for chunk in chunks if chunk)
+                    logger.info(f"Fallback extraction: {len(text)} characters from {url}")
+                    return text
             else:
-                # Fallback to BeautifulSoup
-                soup = BeautifulSoup(html_content, 'html.parser')
-                
-                # Remove script and style elements
-                for script in soup(["script", "style"]):
-                    script.decompose()
-                
-                # Get text content
-                text = soup.get_text()
-                lines = (line.strip() for line in text.splitlines())
-                chunks = (phrase.strip() for line in lines for phrase in line.split("  "))
-                text = ' '.join(chunk for chunk in chunks if chunk)
-                
-                logger.info(f"Fallback extraction: {len(text)} characters from {url}")
-                return text
-                
+                logger.error(f"scrape.do returned status {response.status_code} for {url}")
+                return None
         except Exception as e:
-            logger.error(f"Failed to fetch {url}: {e}")
+            logger.error(f"Failed to fetch {url} with scrape.do: {e}")
             return None
-    
+
+    def _rate_limit_domain_sync(self, url: str):
+        """Synchronous rate limiting per domain for requests-based fetch."""
+        domain = urlparse(url).netloc
+        current_time = time.time()
+        if domain in self.domain_last_request:
+            time_since_last = current_time - self.domain_last_request[domain]
+            if time_since_last < self.min_delay_per_domain:
+                time.sleep(self.min_delay_per_domain - time_since_last)
+        self.domain_last_request[domain] = time.time()
+
+    # Optionally, keep the old async method for compatibility, but point it to the new sync method
+    async def scraperapi_fetch(self, url: str) -> Optional[str]:
+        """Alias for scrapedo_fetch for compatibility (runs in thread executor)."""
+        import concurrent.futures
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(None, self.scrapedo_fetch, url)
+
+    async def selenium_fetch(self, url: str) -> Optional[str]:
+        """Alias for scraperapi_fetch (now using scrape.do) for compatibility."""
+        return await self.scraperapi_fetch(url)
+
     async def get_page_title(self, url: str) -> str:
-        """Extract page title"""
+        """Extract page title using ScraperAPI"""
         try:
-            if self.driver and self.driver.current_url == url:
-                return self.driver.title
-            else:
-                # Quick request for title only
-                response = requests.get(url, timeout=5)
-                soup = BeautifulSoup(response.content, 'html.parser')
-                title_tag = soup.find('title')
-                return title_tag.text.strip() if title_tag else url
-        except Exception:
+            # ScraperAPI parameters for title extraction
+            params = {
+                'api_key': self.scraperapi_key,
+                'url': url,
+                'country_code': 'us'
+            }
+            
+            async with aiohttp.ClientSession() as session:
+                async with session.get(self.scraperapi_url, params=params, timeout=15) as response:
+                    if response.status == 200:
+                        html_content = await response.text()
+                        soup = BeautifulSoup(html_content, 'html.parser')
+                        title_tag = soup.find('title')
+                        return title_tag.text.strip() if title_tag else url
+                    else:
+                        return url
+        except Exception as e:
+            logger.error(f"Failed to get title for {url}: {e}")
             return url
     
     async def cleanup(self):
-        """Clean up resources"""
-        if self.driver:
-            self.driver.quit()
-            self.driver = None
-            logger.info("Chrome driver cleaned up")
+        """Clean up resources - no longer needed with ScraperAPI"""
+        logger.info("ScraperAPI service cleanup - no resources to clean")

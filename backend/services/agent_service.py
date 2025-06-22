@@ -254,6 +254,48 @@ class AgentService:
                 log_file.write(f"PROCESSING FINAL ACCUMULATED STATEMENT: '{full_statement}'\n")
             await self._process_reasoning_line(run_id, full_statement)
 
+    def rewrite_query_for_search(self, query: str) -> str:
+        """
+        Rewrite the user query to maximize search results (make it more generic/SEO-friendly).
+        This is a simple heuristic; for best results, use an LLM or more advanced NLP.
+        """
+        import re
+        # Remove question words and make generic
+        query = query.strip()
+        # Remove common question prefixes
+        query = re.sub(r'^(what|who|when|where|why|how|explain|describe|give me|tell me about)\b', '', query, flags=re.IGNORECASE).strip()
+        # Remove punctuation
+        query = re.sub(r'[?!.]+$', '', query)
+        # Add generic keywords
+        if len(query.split()) < 5:
+            query += " information details overview summary"
+        return query
+
+    async def rewrite_query_with_gpt(self, query: str) -> str:
+        """
+        Use GPT-4.1-nano to rephrase the query for search (not generic, not SEO, just a natural rewording).
+        """
+        import openai
+        prompt = (
+            "Rephrase the following question to maximize the chance of finding relevant information in a web search. "
+            "Do not answer the question, do not make it generic or SEO-optimized. Just reword it naturally for search.\n\n"
+            f"Question: {query}\nRephrased: "
+        )
+        try:
+            client = openai.AsyncOpenAI()
+            response = await client.chat.completions.create(
+                model="gpt-4.1-nano",  # Use the correct model name for your deployment
+                messages=[{"role": "user", "content": prompt}],
+                max_tokens=64,
+                temperature=0.4,
+            )
+            rewritten = response.choices[0].message.content.strip()
+            return rewritten
+        except Exception as e:
+            import logging
+            logging.warning(f"GPT-4.1-nano rewrite failed, falling back to heuristic: {e}")
+            return self.rewrite_query_for_search(query)
+
     async def _process_full_query(self, run_id: str, query: str, chat_model: str):
         """Process a full query with search and scraping"""
         # Track rate limits
@@ -267,15 +309,19 @@ class AgentService:
         # self.embedding_service.clear_database()  # Commented out to prevent excessive API calls
         
         # Step 1: Initial search
+        rewritten_query = await self.rewrite_query_with_gpt(query)
+        await self._emit_event(run_id, {
+            "type": "thought",
+            "text": f"Rewriting query for search (GPT-4.1): '{rewritten_query}'"
+        })
         await self._emit_event(run_id, {
             "type": "tool_use",
             "tool": "google_search",
             "action": "Searching Google",
-            "details": f"Query: '{query}'"
+            "details": f"Query: '{rewritten_query}'"
         })
-        
         if google_query_count < self.max_google_queries:
-            search_results = await self.search_service.google_search(query, k=5)
+            search_results = await self.search_service.google_search(rewritten_query, k=5)
             google_query_count += 1
             
             await self._emit_event(run_id, {
@@ -289,18 +335,25 @@ class AgentService:
                 if selenium_fetch_count >= self.max_selenium_fetches:
                     break
                     
+                # Get favicon URL for the domain
+                from urllib.parse import urlparse
+                domain = urlparse(result.url).netloc
+                favicon_url = f"https://www.google.com/s2/favicons?domain={domain}"
+
                 await self._emit_event(run_id, {
                     "type": "tool_use",
-                    "tool": "web_scraper", 
+                    "tool": "web_scraper",
                     "action": "Scraping webpage",
-                    "details": f"URL: {result.url}"
+                    "details": f"URL: {result.url}",
+                    "favicon": favicon_url
                 })
-                
+
                 await self._emit_event(run_id, {
                     "type": "page",
-                    "url": result.url
+                    "url": result.url,
+                    "favicon": favicon_url
                 })
-                
+
                 # Fetch page content
                 content = await self.scraper_service.selenium_fetch(result.url)
                 if content:
