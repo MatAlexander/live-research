@@ -40,6 +40,10 @@ interface ThoughtEvent {
   type: string;
   content: string;
   timestamp: number;
+  favicon?: string;
+  bubbleType?: string;
+  bubbleIcon?: string;
+  bubbleText?: string;
 }
 
 interface Citation {
@@ -175,6 +179,10 @@ export class AppComponent implements OnInit, OnDestroy {
     logger.log(`🧪 Change detection triggered manually`);
   }
 
+  public requestStartTime: number | null = null;
+  public finalAnswerTime: number | null = null;
+  public thoughtElapsedSeconds: number = 0;
+
   submitQuery() {
     const queryText = this.query;
     if (!queryText.trim() || this.isLoading) return;
@@ -190,6 +198,12 @@ export class AppComponent implements OnInit, OnDestroy {
 
     // Unsubscribe from any previous stream before starting a new one
     this.querySubscription?.unsubscribe();
+
+    this.collapseThinkingPanel = false; // Expand panel on new query
+
+    this.requestStartTime = Date.now();
+    this.finalAnswerTime = null;
+    this.thoughtElapsedSeconds = 0;
 
     this.querySubscription = this.agentService.createQuery(queryText, this.selectedModel).pipe(
       tap(response => {
@@ -222,35 +236,80 @@ export class AppComponent implements OnInit, OnDestroy {
     });
   }
 
+  public collapseThinkingPanel = false;
+  public showThoughtsCollapsed = false;
+  public thoughtCollapseSeconds = 0;
+  public thoughtCollapseTimer: any = null;
+
+  // Call this to collapse the panel and start the timer
+  collapsePanelWithTimer() {
+    this.collapseThinkingPanel = true;
+    this.showThoughtsCollapsed = true;
+    this.thoughtCollapseSeconds = 0;
+    if (this.thoughtCollapseTimer) {
+      clearInterval(this.thoughtCollapseTimer);
+    }
+    this.thoughtCollapseTimer = setInterval(() => {
+      this.thoughtCollapseSeconds++;
+      this.cdr.detectChanges();
+    }, 1000);
+  }
+
+  // Call this to expand the panel again
+  expandThinkingPanel() {
+    this.collapseThinkingPanel = false;
+    this.showThoughtsCollapsed = false;
+    if (this.thoughtCollapseTimer) {
+      clearInterval(this.thoughtCollapseTimer);
+      this.thoughtCollapseTimer = null;
+    }
+    this.cdr.detectChanges();
+  }
+
   private handleStreamEvent(event: any) {
     logger.log(`🔄 handleStreamEvent called with: ${event.type}`);
     logger.log(`🔄 Event data: ${JSON.stringify(event)}`);
     logger.log(`🔄 BEFORE processing - thoughts.length: ${this.thoughts.length}, finalAnswer.length: ${this.finalAnswer.length}`);
-    
+    // Skip embedding tool events
+    if ((event.type === 'tool_use' || event.type === 'tool_result') && event.tool === 'embedding') {
+      return;
+    }
+    // Skip web_scraper tool_result events for successful scrape
+    if (event.type === 'tool_result' && event.tool === 'web_scraper' && event.result && event.result.startsWith('Successfully scraped content')) {
+      return;
+    }
     switch (event.type) {
       case 'thought':
       case 'tool_use':
       case 'tool_result':
         logger.log(`💭 Processing thought event: ${event.type}`);
         logger.log(`💭 Content: ${event.text || event.content}`);
-        
         const newThought = this.createThoughtEvent(event);
+        if (event.favicon) newThought.favicon = event.favicon;
         logger.log(`💭 Created thought object: ${JSON.stringify(newThought)}`);
-        
         const oldLength = this.thoughts.length;
         this.thoughts = [...this.thoughts, newThought];
         const newLength = this.thoughts.length;
-        
         logger.log(`💭 Array update: ${oldLength} -> ${newLength}`);
         logger.log(`💭 Updated thoughts array: ${JSON.stringify(this.thoughts.map(t => t.content.substring(0, 50)))}`);
         break;
         
       case 'final_answer':
+      case 'complete':
         logger.log(`💡 Processing final answer: ${event.text || event.content}`);
         logger.log(`💡 Final answer length: ${(event.text || event.content || '').length} chars`);
         const finalContent = event.text || event.content;
         this.finalAnswer = this.finalAnswer ? this.finalAnswer + ' ' + finalContent : finalContent;
         logger.log(`💡 Final answer updated: ${this.finalAnswer.length} chars`);
+        this.finalAnswerTime = Date.now();
+        if (this.requestStartTime) {
+          this.thoughtElapsedSeconds = Math.round((this.finalAnswerTime - this.requestStartTime) / 1000);
+        }
+        // Collapse the thinking panel after a short delay
+        setTimeout(() => {
+          this.collapsePanelWithTimer();
+          this.cdr.detectChanges();
+        }, 1200);
         break;
         
       case 'citation':
@@ -277,22 +336,46 @@ export class AppComponent implements OnInit, OnDestroy {
 
   private createThoughtEvent(event: any): ThoughtEvent {
     let content = '';
+    let bubbleType = '';
+    let bubbleIcon = '';
+    let bubbleText = '';
     switch (event.type) {
       case 'thought':
         content = event.text || event.content;
         break;
       case 'tool_use':
-        content = `🔧 ${event.action || 'Tool Use'}: ${event.details || ''}`;
+        if (event.tool === 'google_search' && event.details) {
+          // Extract search keyword from details
+          const match = event.details.match(/Query: '(.+)'/);
+          bubbleType = 'search';
+          bubbleIcon = 'search';
+          bubbleText = match ? match[1] : event.details;
+          content = '';
+        } else if (event.tool === 'web_scraper' && event.details) {
+          // Extract domain from details
+          const match = event.details.match(/URL: (https?:\/\/)?([^\/]+)/);
+          bubbleType = 'scrape';
+          bubbleIcon = event.favicon || '';
+          bubbleText = match ? match[2] : event.details;
+          content = '';
+        } else {
+          content = `${event.action || 'Tool Use'}: ${event.details || ''}`;
+        }
         break;
       case 'tool_result':
         content = `✅ ${event.result || 'Tool completed'}`;
         break;
     }
-    return {
+    const thought: ThoughtEvent = {
       type: event.type,
       content: content,
-      timestamp: Date.now()
+      timestamp: Date.now(),
+      favicon: event.favicon,
+      bubbleType: bubbleType,
+      bubbleIcon: bubbleIcon,
+      bubbleText: bubbleText
     };
+    return thought;
   }
 
   trackByIndex(index: number, item: ThoughtEvent): number {
