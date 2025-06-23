@@ -132,7 +132,7 @@
           </div>
         </ng-container>
         <ng-template #expandedThinkingPanel>
-          <h2 class="text-lg font-semibold text-neutral-800 mb-4 flex items-center justify-between">
+          <h2 class="text-lg font-semibold text-neutral-800 mb-4 flex items-center justify-between flex-shrink-0">
             <div class="flex items-center">
               <span>Thinking</span>
               <span class="ml-2 text-xs text-neutral-400">({{ thoughts.length }} thoughts)</span>
@@ -147,12 +147,12 @@
               Collapse
             </button>
           </h2>
-          <div class="flex-1 overflow-y-auto space-y-2 custom-scrollbar pb-2 min-h-0">
+          <div class="flex-1 overflow-y-auto space-y-3 custom-scrollbar pb-2 max-h-[calc(60vh-8rem)]">
             <div *ngIf="thoughts.length === 0 && !isLoading" 
                  class="text-center text-neutral-400 mt-10">
               <p>The AI's thinking process will appear here...</p>
             </div>
-            <div *ngIf="thoughts.length > 0 || isLoading" class="space-y-2">
+            <div *ngIf="thoughts.length > 0 || isLoading" class="space-y-3">
               <div *ngFor="let thought of thoughts; trackBy: trackByIndex" 
                    class="thought-item flex items-start space-x-3 bg-white/30 rounded-lg px-4 py-3 text-neutral-800 max-w-full border border-white/20"
                    [style.display]="(thought.content || thought.bubbleType) ? 'flex' : 'none'">
@@ -180,9 +180,9 @@
                   </ng-container>
                 </div>
                 
-                <!-- Content section - flexible width with proper text wrapping -->
+                <!-- Content section - flexible width with proper text wrapping, no individual scrollbar -->
                 <div class="thought-text flex-1 min-w-0" *ngIf="thought.content">
-                  <div class="max-h-20 overflow-y-auto text-sm leading-relaxed break-words custom-scrollbar">
+                  <div class="text-sm leading-relaxed break-words whitespace-pre-wrap">
                     {{ thought.content }}
                   </div>
                 </div>
