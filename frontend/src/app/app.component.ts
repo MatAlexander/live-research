@@ -270,14 +270,17 @@ export class AppComponent implements OnInit, OnDestroy {
     logger.log(`🔄 handleStreamEvent called with: ${event.type}`);
     logger.log(`🔄 Event data: ${JSON.stringify(event)}`);
     logger.log(`🔄 BEFORE processing - thoughts.length: ${this.thoughts.length}, finalAnswer.length: ${this.finalAnswer.length}`);
+    
     // Skip embedding tool events
     if ((event.type === 'tool_use' || event.type === 'tool_result') && event.tool === 'embedding') {
       return;
     }
+    
     // Skip web_scraper tool_result events for successful scrape
     if (event.type === 'tool_result' && event.tool === 'web_scraper' && event.result && event.result.startsWith('Successfully scraped content')) {
       return;
     }
+    
     switch (event.type) {
       case 'thought':
       case 'tool_use':
@@ -287,11 +290,17 @@ export class AppComponent implements OnInit, OnDestroy {
         const newThought = this.createThoughtEvent(event);
         if (event.favicon) newThought.favicon = event.favicon;
         logger.log(`💭 Created thought object: ${JSON.stringify(newThought)}`);
-        const oldLength = this.thoughts.length;
-        this.thoughts = [...this.thoughts, newThought];
-        const newLength = this.thoughts.length;
-        logger.log(`💭 Array update: ${oldLength} -> ${newLength}`);
-        logger.log(`💭 Updated thoughts array: ${JSON.stringify(this.thoughts.map(t => t.content.substring(0, 50)))}`);
+        
+        // Only add thoughts that have content or bubble type
+        if (newThought.content || newThought.bubbleType) {
+          const oldLength = this.thoughts.length;
+          this.thoughts = [...this.thoughts, newThought];
+          const newLength = this.thoughts.length;
+          logger.log(`💭 Array update: ${oldLength} -> ${newLength}`);
+          logger.log(`💭 Updated thoughts array: ${JSON.stringify(this.thoughts.map(t => t.content.substring(0, 50)))}`);
+        } else {
+          logger.log(`💭 Skipping empty thought: no content or bubble type`);
+        }
         break;
         
       case 'final_answer':
@@ -339,6 +348,7 @@ export class AppComponent implements OnInit, OnDestroy {
     let bubbleType = '';
     let bubbleIcon = '';
     let bubbleText = '';
+    
     switch (event.type) {
       case 'thought':
         content = event.text || event.content;
@@ -349,23 +359,29 @@ export class AppComponent implements OnInit, OnDestroy {
           const match = event.details.match(/Query: '(.+)'/);
           bubbleType = 'search';
           bubbleIcon = 'search';
-          bubbleText = match ? match[1] : event.details;
-          content = '';
+          bubbleText = match ? match[1] : 'Search';
+          content = ''; // Don't show content for search bubbles
         } else if (event.tool === 'web_scraper' && event.details) {
           // Extract domain from details
           const match = event.details.match(/URL: (https?:\/\/)?([^\/]+)/);
           bubbleType = 'scrape';
           bubbleIcon = event.favicon || '';
-          bubbleText = match ? match[2] : event.details;
-          content = '';
+          bubbleText = match ? match[2] : 'Website';
+          content = ''; // Don't show content for scrape bubbles
         } else {
           content = `${event.action || 'Tool Use'}: ${event.details || ''}`;
         }
         break;
       case 'tool_result':
-        content = `✅ ${event.result || 'Tool completed'}`;
+        // Skip tool results for search and scrape - they're represented by bubbles only
+        if (event.tool === 'google_search' || event.tool === 'web_scraper') {
+          content = '';
+        } else {
+          content = `✅ ${event.result || 'Tool completed'}`;
+        }
         break;
     }
+    
     const thought: ThoughtEvent = {
       type: event.type,
       content: content,
@@ -375,6 +391,7 @@ export class AppComponent implements OnInit, OnDestroy {
       bubbleIcon: bubbleIcon,
       bubbleText: bubbleText
     };
+    
     return thought;
   }
 

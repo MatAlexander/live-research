@@ -87,3 +87,69 @@ header {
 }
 
 /* Remove all glass, neon, and conic backgrounds */
+
+/* Improved thought bubbles */
+.bubble {
+  display: inline-flex;
+  align-items: center;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.bubble svg {
+  flex-shrink: 0;
+}
+
+.bubble span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Thought items layout */
+.thought-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  min-height: 3rem;
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+}
+
+.thought-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+}
+
+/* Bubble colors */
+.search-bubble {
+  background-color: #dbeafe !important;
+  color: #1e40af !important;
+}
+
+.scrape-bubble {
+  background-color: #dcfce7 !important;
+  color: #166534 !important;
+}
+
+.default-bubble {
+  background-color: #f1f5f9 !important;
+  color: #475569 !important;
+}
+
+/* Collapsed thinking panel improvements */
+.h-16 {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 0 1rem;
+}
+
+.h-16 span {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
