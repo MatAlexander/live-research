@@ -310,10 +310,7 @@ class AgentService:
         
         # Step 1: Initial search
         rewritten_query = await self.rewrite_query_with_gpt(query)
-        await self._emit_event(run_id, {
-            "type": "thought",
-            "text": f"Rewriting query for search (GPT-4.1): '{rewritten_query}'"
-        })
+        # Remove the rewriting query thought event - only show the search bubble
         await self._emit_event(run_id, {
             "type": "tool_use",
             "tool": "google_search",
@@ -321,9 +318,8 @@ class AgentService:
             "details": f"Query: '{rewritten_query}'"
         })
         if google_query_count < self.max_google_queries:
-            search_results = await self.search_service.google_search(rewritten_query, k=5)
+            search_results = await self.search_service.google_search(rewritten_query, k=20)
             google_query_count += 1
-            
             await self._emit_event(run_id, {
                 "type": "tool_result",
                 "tool": "google_search",
@@ -331,7 +327,7 @@ class AgentService:
             })
             
             # Step 2: Fetch and process pages
-            for result in search_results[:3]:  # Limit to top 3 results
+            for result in search_results[:5]:  # Limit to top 5 results for scraping
                 if selenium_fetch_count >= self.max_selenium_fetches:
                     break
                     
@@ -449,20 +445,19 @@ class AgentService:
         system_prompt = (
             "You are an expert research analyst AI. I have already searched the web and scraped relevant content for you. "
             "Analyze the provided context and give a comprehensive answer.\n\n"
-            
             "IMPORTANT RESPONSE FORMAT:\n"
             "- Start each reasoning step with 'THOUGHT: ' followed by your analysis\n"
             "- Start your final answer with 'FINAL: ' followed by the complete response\n"
             "- Use multiple THOUGHT: lines to show your reasoning process\n"
             "- End with one FINAL: section that directly answers the user's question\n"
-            "- Be thorough but concise in your thoughts\n\n"
-            
+            "- Be thorough but concise in your thoughts\n"
+            "- If you need more information, you may request to scrape 4-10 URLs from the search results in parallel using the scrape_parallel tool.\n"
+            "- You are encouraged to scrape multiple URLs in parallel if the answer requires deeper research.\n\n"
             "Example format:\n"
             "THOUGHT: Analyzing the first source about quantum developments...\n"
             "THOUGHT: The second source discusses cybersecurity implications...\n"
             "THOUGHT: Combining these insights reveals...\n"
             "FINAL: Based on my analysis, the latest developments in quantum computing include...\n\n"
-            
             "The research has already been completed. Your job is to analyze and synthesize the information."
         )
         
@@ -483,14 +478,65 @@ class AgentService:
         """Process OpenAI streaming response"""
         logger.info(f"🌊 Creating OpenAI stream for {run_id}")
         
+        # tool_schemas definition moved to the top to ensure it is always defined before use
+        tool_schemas = [
+            {
+                "type": "function",
+                "function": {
+                    "name": "search",
+                    "description": "Perform a Google search and return a list of URLs.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "query": {"type": "string", "description": "The search query."},
+                            "num_results": {"type": "integer", "description": "Number of results to return."}
+                        },
+                        "required": ["query"]
+                    }
+                }
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "scrape",
+                    "description": "Scrape the content of a web page.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "url": {"type": "string", "description": "The URL to scrape."}
+                        },
+                        "required": ["url"]
+                    }
+                }
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "scrape_parallel",
+                    "description": "Scrape up to 10 web pages in parallel. Returns a mapping of url to content.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "urls": {
+                                "type": "array",
+                                "items": {"type": "string", "format": "uri"},
+                                "description": "A list of up to 10 URLs to scrape in parallel."
+                            }
+                        },
+                        "required": ["urls"]
+                    }
+                }
+            }
+        ]
+        
         # Stream response from OpenAI with selected model
         try:
             stream = self.client.chat.completions.create(
                 model=chat_model,
                 messages=messages,
                 stream=True,
-                max_completion_tokens=2000   # Use max_completion_tokens for o4-mini
-                # Note: o4-mini only supports default temperature (1)
+                max_completion_tokens=4000,  # Increased token limit for longer, more comprehensive answers
+                tools=tool_schemas
             )
             logger.info(f"✅ OpenAI stream created successfully for {run_id}")
         except Exception as e:

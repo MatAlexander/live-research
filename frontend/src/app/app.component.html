@@ -212,26 +212,25 @@
 
       <!-- Main Answer Section: appears below thoughts after collapse -->
       <div *ngIf="collapseThinkingPanel" class="mt-6">
-        <div class="glass-panel p-8 rounded-xl border border-sky-500/20 bg-slate-900/80 shadow-xl">
-          <h2 class="text-xl font-semibold text-white mb-8 flex items-center">
-            <svg class="w-6 h-6 mr-3 text-sky-400" fill="currentColor" viewBox="0 0 20 20">
+        <div class="glass-panel p-6 rounded-xl border border-sky-500/20 bg-slate-900/80 shadow-xl">
+          <h2 class="text-lg font-semibold text-white mb-6 flex items-center">
+            <svg class="w-5 h-5 mr-2 text-sky-400" fill="currentColor" viewBox="0 0 20 20">
               <path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-8-3a1 1 0 00-.867.5 1 1 0 11-1.731-1A3 3 0 0113 8a3.001 3.001 0 01-2 2.83V11a1 1 0 11-2 0v-1a1 1 0 011-1 1 1 0 100-2zm0 8a1 1 0 100-2 1 1 0 000 2z" clip-rule="evenodd"/>
             </svg>
-            Research Summary
-            <span *ngIf="finalAnswer" class="ml-3 text-sm text-slate-400">({{ finalAnswer.length }} characters)</span>
+            Answer
+            <span *ngIf="finalAnswer" class="ml-2 text-xs text-slate-400">({{ finalAnswer.length }} chars)</span>
           </h2>
-          <div class="chatgpt-answer-container p-6">
-            <div *ngIf="!finalAnswer && !isLoading" class="answer-empty-state text-center py-12">
-              <div class="text-6xl mb-6">🤖</div>
-              <h3 class="text-lg font-medium text-slate-300 mb-2">Waiting for AI Analysis</h3>
-              <p class="text-slate-400">The comprehensive research summary will appear here...</p>
+          <div class="chatgpt-answer-container">
+            <div *ngIf="!finalAnswer && !isLoading" class="answer-empty-state">
+              <div class="text-4xl mb-4">💡</div>
+              <p>The AI's answer will appear here...</p>
             </div>
             <div *ngIf="finalAnswer" class="answer-content">
-              <div class="answer-text text-base leading-relaxed whitespace-pre-wrap">{{ finalAnswer }}</div>
+              <div class="answer-text">{{ finalAnswer }}</div>
             </div>
-            <div *ngIf="isLoading && !finalAnswer" class="answer-loading text-center py-8">
-              <div class="loading-spinner mx-auto mb-4"></div>
-              <span class="text-slate-300">Analyzing sources and generating comprehensive summary...</span>
+            <div *ngIf="isLoading && !finalAnswer" class="answer-loading">
+              <div class="loading-spinner"></div>
+              <span>Researching and generating answer...</span>
             </div>
           </div>
         </div>
